@@ -6,6 +6,7 @@ from ultralytics import YOLO
 import tempfile
 import config
 from utils import load_model, infer_uploaded_image, infer_uploaded_video
+from pathlib import Path  # Import Path to handle file paths dynamically
 
 # Setting page layout
 st.set_page_config(
