@@ -1,13 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""
--------------------------------------------------
-   @File Name:     app.py
-   @Author:        Luyao.zhang
-   @Date:          2023/5/15
-   @Description:
--------------------------------------------------
-"""
 from pathlib import Path
 from PIL import Image
 import streamlit as st
@@ -60,6 +52,9 @@ except Exception as e:
     st.error(f"Unable to load model. Please check the specified path: {model_path}")
 
 # image/video options
+# In app.py, modify the source selection part:
+
+# image/video options
 st.sidebar.header("Image/Video Config")
 source_selectbox = st.sidebar.selectbox(
     "Select Source",
@@ -72,6 +67,11 @@ if source_selectbox == config.SOURCES_LIST[0]: # Image
 elif source_selectbox == config.SOURCES_LIST[1]: # Video
     infer_uploaded_video(confidence, model)
 elif source_selectbox == config.SOURCES_LIST[2]: # Webcam
-    infer_uploaded_webcam(confidence, model)
+    if st.runtime.exists():  # Check if running on Streamlit Cloud
+        st.warning("⚠️ Webcam feature is not available on Streamlit Cloud")
+        st.info("Please select either Image or Video option instead")
+        st.info("To use the webcam feature, run this application locally on your computer")
+    else:
+        infer_uploaded_webcam(confidence, model)
 else:
-    st.error("Currently only 'Image' and 'Video' source are implemented")
+    st.error("Currently only 'Image' and 'Video' sources are implemented")

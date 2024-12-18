@@ -1,1 +1,3 @@
 libgl1-mesa-glx
+libv4l-dev
+v4l-utils

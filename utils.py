@@ -145,25 +145,39 @@ def infer_uploaded_webcam(conf, model):
     Execute inference for webcam.
     """
     # Check if running on Streamlit Cloud
-    if os.getenv('STREAMLIT_CLOUD'):
-        st.warning("Webcam capture is not supported on Streamlit Cloud")
+    if st.runtime.exists():  # Check if running on Streamlit
+        st.warning("⚠️ Webcam capture is not supported on Streamlit Cloud. Please run this app locally for webcam support.")
+        st.info("💡 You can still use the Image and Video upload features!")
         return
 
     try:
-        flag = st.button(label="Stop running")
-        vid_cap = cv2.VideoCapture(0)  # local camera
+        st.info("ℹ️ Starting webcam... Please allow access if prompted by your browser.")
+        vid_cap = cv2.VideoCapture(0)
         
         if not vid_cap.isOpened():
-            st.error("Error: Could not access webcam")
+            st.error("❌ Error: Could not access webcam! Please check if:")
+            st.error("1. Your webcam is properly connected")
+            st.error("2. You've granted browser permission to access the webcam")
+            st.error("3. No other application is using the webcam")
             return
 
+        st.success("✅ Webcam successfully accessed!")
+        
+        # Create a stop button
+        stop = st.button("Stop")
         st_frame = st.empty()
-        while not flag:
+        
+        while not stop:
             success, image = vid_cap.read()
             if success:
                 _display_detected_frames(conf, model, st_frame, image)
             else:
+                st.error("❌ Failed to read from webcam")
                 break
+            
         vid_cap.release()
+        st.success("✅ Webcam released successfully")
+        
     except Exception as e:
-        st.error(f"Error accessing webcam: {str(e)}")
+        st.error(f"❌ Error accessing webcam: {str(e)}")
+        st.error("Please make sure you have the necessary permissions and drivers installed")

@@ -18,8 +18,12 @@ if root_path not in sys.path:
 ROOT = root_path.relative_to(Path.cwd())
 
 
-# Source
-SOURCES_LIST = ["Image", "Video", "Webcam"]
+# Source options
+# For Streamlit Cloud deployment
+if st.runtime.exists():
+    SOURCES_LIST = ["Image", "Video"]  # Remove webcam option for cloud deployment
+else:
+    SOURCES_LIST = ["Image", "Video", "Webcam"]
 
 
 # DL model config
