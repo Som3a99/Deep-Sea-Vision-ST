@@ -1,0 +1,24 @@
+# Core dependencies
+streamlit
+numpy
+pandas
+
+# Image processing
+Pillow
+opencv-python-headless # Use headless version for cloud deployment
+matplotlib
+
+# YOLO dependencies
+ultralytics
+torch
+torchvision
+
+# Additional utilities
+python-dotenv
+requests
+PyYAML
+tqdm
+
+# Optional but recommended for better performance
+scipy
+seaborn
