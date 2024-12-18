@@ -1,42 +1,20 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 from pathlib import Path
-import sys
 
 # Get the absolute path of the current file
-file_path = Path(__file__).resolve()
+ROOT = Path(__file__).resolve().parent
 
-# Get the parent directory of the current file
-root_path = file_path.parent
+# Source types
+SOURCES_LIST = ["Image", "Video", "Webcam", "WebRTC"]
 
-# Add the root path to the sys.path list if it is not already there
-if root_path not in sys.path:
-    sys.path.append(str(root_path))
-
-# Get the relative path of the root directory with respect to the current working directory
-ROOT = root_path.relative_to(Path.cwd())
-
-
-# Source options
-# For Streamlit Cloud deployment
-if st.runtime.exists():
-    SOURCES_LIST = ["Image", "Video"]  # Remove webcam option for cloud deployment
-else:
-    SOURCES_LIST = ["Image", "Video", "Webcam"]
-
-
-# DL model config
+# Model directory and available YOLO models
 DETECTION_MODEL_DIR = ROOT / 'weights' / 'detection'
-YOLOv8n = DETECTION_MODEL_DIR / "yolov8n.pt"
-YOLOv8s = DETECTION_MODEL_DIR / "yolov8s.pt"
-YOLOv8m = DETECTION_MODEL_DIR / "yolov8m.pt"
-YOLOv8l = DETECTION_MODEL_DIR / "yolov8l.pt"
-YOLOv8x = DETECTION_MODEL_DIR / "yolov8x.pt"
-
 DETECTION_MODEL_LIST = [
     "yolov8n.pt",
     "yolov8s.pt",
     "yolov8m.pt",
     "yolov8l.pt",
-    "yolov8x.pt"]
+    "yolov8x.pt",
+]
+
+# Add weights paths dynamically for clarity (optional)
+YOLO_WEIGHTS = {model: DETECTION_MODEL_DIR / model for model in DETECTION_MODEL_LIST}
