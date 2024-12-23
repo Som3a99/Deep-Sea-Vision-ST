@@ -47,16 +47,20 @@ def get_ice_servers():
     # Fallback to multiple public STUN/TURN servers
     return RTCConfiguration(
         iceServers=[
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun.relay.metered.ca:80"]},
-            {"urls": ["turn:a.relay.metered.ca:80"],
-             "username": "openrelayproject",
-             "credential": "openrelayproject"},
-            {"urls": ["turn:a.relay.metered.ca:80?transport=tcp"],
-             "username": "openrelayproject",
-             "credential": "openrelayproject"}
-        ],
+            {'url': 'stun:global.stun.twilio.com:3478', 
+             'urls': 'stun:global.stun.twilio.com:3478'}, 
+            {'url': 'turn:global.turn.twilio.com:3478?transport=udp', 
+             'username': '9d4724e20cf48b4a108d2699ca374b2ab6c79760abe466520c7069ac557dbf4f', 
+            'urls': 'turn:global.turn.twilio.com:3478?transport=udp', 
+            'credential': 'n5EXqt0225m7tEY9x23FqnG2lLLnohyjw2zY/G7ILyo='}, 
+            {'url': 'turn:global.turn.twilio.com:3478?transport=tcp', 
+             'username': '9d4724e20cf48b4a108d2699ca374b2ab6c79760abe466520c7069ac557dbf4f', 
+             'urls': 'turn:global.turn.twilio.com:3478?transport=tcp', 
+             'credential': 'n5EXqt0225m7tEY9x23FqnG2lLLnohyjw2zY/G7ILyo='}, 
+            {'url': 'turn:global.turn.twilio.com:443?transport=tcp', 
+             'username': '9d4724e20cf48b4a108d2699ca374b2ab6c79760abe466520c7069ac557dbf4f', 
+             'urls': 'turn:global.turn.twilio.com:443?transport=tcp', 
+             'credential': 'n5EXqt0225m7tEY9x23FqnG2lLLnohyjw2zY/G7ILyo='}],
         iceTransportPolicy="all"
     )
 
