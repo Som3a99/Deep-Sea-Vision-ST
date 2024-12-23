@@ -89,8 +89,9 @@ def setup_webcam_interface(confidence: float, model):
 
     rtc_configuration = {
         "iceServers": [
-            {"urls": "stun:stun.l.google.com:19302"},
-            {"urls": "turn:your-turn-server", "username": "user", "credential": "password"}
+            {"urls": "stun:stun.l.google.com:19302"},  # Google STUN server
+            {"urls": "stun:stun1.l.google.com:19302"},  # Backup STUN server
+            {"urls": "stun:stun2.l.google.com:19302"},  # Additional STUN server
         ]
     }
 
