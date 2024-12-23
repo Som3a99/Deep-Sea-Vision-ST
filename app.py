@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from typing import Optional
 from dataclasses import dataclass
+from ultralytics import YOLO
 from time import perf_counter
 
 # Enhanced logging configuration
