@@ -1,12 +1,6 @@
 streamlit
 streamlit-webrtc
 ultralytics
-torch
-torchvision
 Pillow
 opencv-python-headless
-matplotlib
 numpy
-python-multipart
-av
-aiohttp
