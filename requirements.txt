@@ -4,3 +4,4 @@ ultralytics
 Pillow
 opencv-python-headless
 numpy
+twilio
