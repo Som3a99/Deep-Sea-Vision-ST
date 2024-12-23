@@ -1,17 +1,20 @@
 # app.py
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode, RTCConfiguration
 import cv2
 import logging
 import av
+import os
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from utils import load_model, infer_uploaded_image, infer_uploaded_video
 from config import YOLO_WEIGHTS, SOURCES_LIST
-from typing import Optional, Dict
-import time
+from twilio.rest import Client
+import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from typing import Optional
 
-# Configure logging with more detailed format
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -19,36 +22,71 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Performance configurations
-FRAME_RATE = 15  # Increased from 8
-PROCESS_EVERY_N_FRAMES = 3  # Reduced from 5
-MAX_RESOLUTION = (640, 480)  # Optimal resolution for web streaming
+FRAME_RATE = 15
+PROCESS_EVERY_N_FRAMES = 2
+MAX_RESOLUTION = (640, 480)
 THREAD_POOL_SIZE = 2
+MAX_QUEUE_SIZE = 10
 
-class YOLOProcessor(VideoProcessorBase):
+def get_ice_servers():
+    """Get ICE servers configuration with fallback options"""
+    try:
+        # Attempt to use Twilio TURN servers if credentials are available
+        account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
+        auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
+        
+        if account_sid and auth_token:
+            client = Client(account_sid, auth_token)
+            token = client.tokens.create()
+            return RTCConfiguration(
+                iceServers=token.ice_servers
+            )
+    except Exception as e:
+        logger.warning(f"Failed to get Twilio ICE servers: {e}")
+    
+    # Fallback to multiple public STUN/TURN servers
+    return RTCConfiguration(
+        iceServers=[
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun.relay.metered.ca:80"]},
+            {"urls": ["turn:a.relay.metered.ca:80"],
+             "username": "openrelayproject",
+             "credential": "openrelayproject"},
+            {"urls": ["turn:a.relay.metered.ca:80?transport=tcp"],
+             "username": "openrelayproject",
+             "credential": "openrelayproject"}
+        ],
+        iceTransportPolicy="all"
+    )
+
+class YOLOProcessor:
     def __init__(self, confidence: float, model):
         self._confidence = confidence
         self._model = model
-        self._last_frame = None
+        self._frame_queue = queue.Queue(maxsize=MAX_QUEUE_SIZE)
+        self._result_queue = queue.Queue(maxsize=MAX_QUEUE_SIZE)
+        self._thread_pool = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
+        self._processing = False
+        self._lock = threading.Lock()
+        self._last_result = None
         self._frame_count = 0
         self._error_count = 0
         self._max_errors = 3
-        self._lock = threading.Lock()
-        self._thread_pool = ThreadPoolExecutor(max_workers=THREAD_POOL_SIZE)
-        self._processing = False
         
-    def _process_frame(self, img):
+    def _process_frame(self, frame):
         """Process a single frame with the YOLO model."""
         try:
-            results = self._model.predict(img, conf=self._confidence)
+            results = self._model.predict(frame, conf=self._confidence)
             return results[0].plot()
         except Exception as e:
-            logger.error(f"Error in YOLO processing: {e}")
-            return img
-
+            logger.error(f"Frame processing error: {e}")
+            return frame
+            
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         if self._processing:
             return av.VideoFrame.from_ndarray(
-                self._last_frame if self._last_frame is not None else frame.to_ndarray(format="bgr24"),
+                self._last_result if self._last_result is not None else frame.to_ndarray(format="bgr24"),
                 format="bgr24"
             )
 
@@ -60,21 +98,20 @@ class YOLOProcessor(VideoProcessorBase):
             # Skip frames based on counter
             if self._frame_count % PROCESS_EVERY_N_FRAMES != 0:
                 return av.VideoFrame.from_ndarray(
-                    self._last_frame if self._last_frame is not None else img,
+                    self._last_result if self._last_result is not None else img,
                     format="bgr24"
                 )
 
             # Resize for performance
-            height, width = img.shape[:2]
-            if width > MAX_RESOLUTION[0] or height > MAX_RESOLUTION[1]:
+            if img.shape[1] > MAX_RESOLUTION[0] or img.shape[0] > MAX_RESOLUTION[1]:
                 img = cv2.resize(img, MAX_RESOLUTION)
 
             # Process frame in thread pool
             future = self._thread_pool.submit(self._process_frame, img)
-            processed_frame = future.result(timeout=1.0)  # 1 second timeout
+            processed = future.result(timeout=1.0)
             
-            self._last_frame = processed_frame
-            return av.VideoFrame.from_ndarray(processed_frame, format="bgr24")
+            self._last_result = processed
+            return av.VideoFrame.from_ndarray(processed, format="bgr24")
 
         except Exception as e:
             logger.error(f"Error in frame processing: {e}")
@@ -82,29 +119,16 @@ class YOLOProcessor(VideoProcessorBase):
             if self._error_count > self._max_errors:
                 logger.warning("Too many errors, returning original frame")
             return av.VideoFrame.from_ndarray(
-                self._last_frame if self._last_frame is not None else img,
+                self._last_result if self._last_result is not None else img,
                 format="bgr24"
             )
         finally:
             self._processing = False
 
-def get_webrtc_config() -> Dict:
-    """Get WebRTC configuration with multiple STUN servers."""
-    return RTCConfiguration(
-        iceServers=[
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {"urls": ["stun:stun3.l.google.com:19302"]},
-            {"urls": ["stun:stun.ekiga.net:3478"]},
-            {"urls": ["stun:stun.ideasip.com:3478"]},
-            {"urls": ["stun:stun.schlund.de:3478"]},
-            {"urls": ["stun:stun.voiparound.com:3478"]},
-            {"urls": ["stun:stun.voipbuster.com:3478"]},
-            {"urls": ["stun:stun.voipstunt.com:3478"]},
-            {"urls": ["stun:stun.counterpath.com:3478"]}
-        ]
-    )
+    def __del__(self):
+        """Cleanup resources"""
+        if hasattr(self, '_thread_pool'):
+            self._thread_pool.shutdown(wait=False)
 
 @st.cache_resource
 def get_yolo_model(model_path: str) -> Optional[object]:
@@ -124,12 +148,13 @@ def setup_webcam_interface(confidence: float, model):
     
     status_placeholder = st.empty()
     error_placeholder = st.empty()
+    stats_placeholder = st.empty()
 
     try:
         webrtc_ctx = webrtc_streamer(
-            key="detection",
+            key="underwater-detection",
             mode=WebRtcMode.SENDRECV,
-            rtc_configuration=get_webrtc_config(),
+            rtc_configuration=get_ice_servers(),
             video_processor_factory=lambda: YOLOProcessor(confidence, model),
             async_processing=True,
             media_stream_constraints={
@@ -142,8 +167,18 @@ def setup_webcam_interface(confidence: float, model):
             }
         )
 
+        # Show connection status
         if webrtc_ctx.state.playing:
-            status_placeholder.success("Webcam is active and processing!")
+            status_placeholder.success("✅ Webcam is active and processing!")
+            
+            # Display performance stats
+            stats = {
+                "Resolution": f"{MAX_RESOLUTION[0]}x{MAX_RESOLUTION[1]}",
+                "Frame Rate": f"{FRAME_RATE} FPS",
+                "Processing": f"Every {PROCESS_EVERY_N_FRAMES} frames",
+                "Model Confidence": f"{confidence:.2f}"
+            }
+            stats_placeholder.info("Performance Settings:\n" + "\n".join([f"- {k}: {v}" for k, v in stats.items()]))
         else:
             status_placeholder.warning("""
                 Waiting for webcam connection...
@@ -160,6 +195,8 @@ def setup_webcam_interface(confidence: float, model):
             2. Using a different browser (Chrome/Firefox recommended)
             3. Checking your firewall settings
             4. Ensuring your camera is not in use by another application
+            
+            Technical details: {str(e)}
         """)
 
 def main():
@@ -184,22 +221,55 @@ def main():
 
     with st.sidebar:
         st.header("Model Configuration")
-        model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
-        confidence = st.slider("Detection Confidence", 0.0, 1.0, 0.5, 0.05)
         
-        model = get_yolo_model(str(YOLO_WEIGHTS[model_type]))
+        # Model selection with info
+        model_type = st.selectbox(
+            "Select Model",
+            list(YOLO_WEIGHTS.keys()),
+            help="YOLOv8n is fastest, YOLOv8m is most accurate"
+        )
+        
+        # Confidence slider with visual feedback
+        confidence = st.slider(
+            "Detection Confidence",
+            0.0, 1.0, 0.5, 0.05,
+            help="Higher values = fewer but more confident detections"
+        )
+        
+        # Load model with progress indicator
+        with st.spinner("Loading model..."):
+            model = get_yolo_model(str(YOLO_WEIGHTS[model_type]))
+        
         if not model:
             st.error("Failed to load model. Please check model path and try again.")
             st.stop()
+        else:
+            st.success("Model loaded successfully!")
         
-        source_type = st.selectbox("Select Input Source", SOURCES_LIST)
+        # Source selection
+        source_type = st.selectbox(
+            "Select Input Source",
+            SOURCES_LIST,
+            help="Choose how you want to input images for detection"
+        )
 
+    # Process based on source type
     if source_type == "Image":
         infer_uploaded_image(confidence, model)
     elif source_type == "Video":
         infer_uploaded_video(confidence, model)
     elif source_type == "Webcam":
         setup_webcam_interface(confidence, model)
+
+    # Add footer with performance tips
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("""
+        ### Performance Tips:
+        - Use YOLOv8n for faster processing
+        - Lower confidence for more detections
+        - Close other browser tabs
+        - Use Chrome or Firefox
+    """)
 
 if __name__ == "__main__":
     main()
