@@ -7,3 +7,6 @@ Pillow
 opencv-python-headless
 matplotlib
 numpy
+python-multipart
+av
+aiohttp
