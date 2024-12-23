@@ -78,31 +78,35 @@ def get_yolo_model(model_path: str) -> Optional[object]:
         return None
 
 def setup_webcam_interface(confidence: float, model):
-    """Setup WebRTC interface with proper error handling."""
     st.header("Live Detection")
 
     st.warning("""
-        For best results:
-        - Use Chrome or Firefox
-        - Allow camera access
-        - If issues arise, try refreshing the page
+        If the stream doesn't start:
+        - Ensure camera permissions are granted.
+        - Check network restrictions.
+        - Use a different browser (Chrome/Firefox).
     """)
-    
+
+    rtc_configuration = {
+        "iceServers": [
+            {"urls": "stun:stun.l.google.com:19302"},
+            {"urls": "turn:your-turn-server", "username": "user", "credential": "password"}
+        ]
+    }
+
     try:
         webrtc_ctx = webrtc_streamer(
-            key="underwater-detection",
+            key="detection",
             mode=WebRtcMode.SENDRECV,
+            rtc_configuration=rtc_configuration,
             video_processor_factory=lambda: YOLOProcessor(confidence, model),
-            rtc_configuration={
-                "iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]
-            },
-            async_processing=True,
         )
         if webrtc_ctx.state.playing:
-            st.success("Webcam stream started successfully!")
+            st.success("Webcam is live!")
     except Exception as e:
-        st.error(f"Error initializing webcam: {str(e)}")
-        logger.error(f"WebRTC initialization error: {e}", exc_info=True)
+        st.error("Error initializing webcam. Please check your setup.")
+        logger.error(f"WebRTC setup error: {e}")
+
 
 def main():
     initialize_session_state()
