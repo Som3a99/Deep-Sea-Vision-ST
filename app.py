@@ -201,17 +201,17 @@ def main():
             help="Choose your input source type"
         )
 
-   try:
-        if source_type == "Image":
-            infer_uploaded_image(confidence, model)
-        elif source_type == "Video":
-            infer_uploaded_video(confidence, model)
-        elif source_type == "Webcam":
-            setup_webcam_interface(confidence, model)
+    try:
+            if source_type == "Image":
+                infer_uploaded_image(confidence, model)
+            elif source_type == "Video":
+                infer_uploaded_video(confidence, model)
+            elif source_type == "Webcam":
+                setup_webcam_interface(confidence, model)
 
-    except Exception as e:
-        st.error(f"An error occurred: {e}")
-        logger.error(f"Application error: {e}", exc_info=True)
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+            logger.error(f"Application error: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
