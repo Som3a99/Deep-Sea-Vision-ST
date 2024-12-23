@@ -38,6 +38,18 @@ class ProcessingConfig:
     MAX_RETRIES: int = 3
     TIMEOUT: float = 0.5
 
+# Model loading function with caching
+@st.cache_resource
+def get_yolo_model(model_path: str) -> Optional[YOLO]:
+    """Load and cache YOLO model"""
+    try:
+        logger.info(f"Loading model from {model_path}")
+        model = YOLO(model_path)
+        return model
+    except Exception as e:
+        logger.error(f"Error loading model: {e}")
+        return None
+    
 def get_ice_servers():
     """Get ICE servers configuration with improved fallback options"""
     ice_servers = [
