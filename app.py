@@ -4,7 +4,7 @@ import cv2
 import logging
 import av
 import os
-from streamlit_webrtec import webrtc_streamer, WebRtcMode, RTCConfiguration
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
 from utils import load_model, infer_uploaded_image, infer_uploaded_video
 from config import YOLO_WEIGHTS, SOURCES_LIST
 import queue
@@ -17,7 +17,7 @@ from ultralytics import YOLO
 from time import perf_counter
 import psutil
 import gc
-
+import torch
 # Memory management utilities
 def get_memory_usage():
     """Get current memory usage in MB"""
