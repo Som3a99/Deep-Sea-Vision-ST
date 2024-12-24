@@ -1,2 +1,0 @@
-mkdir -p weights/detection
-touch weights/detection/.gitkeep
