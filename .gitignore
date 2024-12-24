@@ -21,16 +21,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# Logs
-*.log
-logs/
-app.log
-
-# Environment
-.env
-.venv
+# Virtual Environment
 venv/
 ENV/
+.env
 
 # IDE
 .idea/
@@ -38,17 +32,24 @@ ENV/
 *.swp
 *.swo
 
-# Project specific
-weights/
-temp/
-*.mp4
-*.avi
-*.mov
+# Logs
+*.log
+logs/
+app.log
+
+# Model weights
+weights/**/*.pt
+!weights/detection/.gitkeep
+
+# Media files
 *.jpg
 *.jpeg
 *.png
-*.weights
-*.pt
+*.gif
+*.mp4
+*.avi
+*.mov
+*.mkv
 
 # Streamlit
 .streamlit/secrets.toml

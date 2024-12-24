@@ -1,16 +1,38 @@
+# Core dependencies
 streamlit
 streamlit-webrtc
 opencv-python-headless
 ultralytics
+
+# Deep Learning
 torch
 torchvision
-numpy
+
+# Image processing
 Pillow
+numpy
+
+# Video processing
 python-multipart
-psutil
 av
 aioice
 aiortc
-typing-extensions
+
+# System utilities
+psutil
 python-dotenv
+
+# Type hints and async support
+typing-extensions
+asyncio
+
+# Logging and monitoring
+logging
+watchdog
+
+# webRTC
 twilio
+
+# Optional: Performance improvements
+# Comment out if not needed
+#nvidia-ml-py3>=7.352.0  # For NVIDIA GPU monitoring

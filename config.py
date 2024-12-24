@@ -1,3 +1,4 @@
+# config.py
 from pathlib import Path
 import os
 
@@ -10,7 +11,6 @@ DETECTION_MODEL_LIST = [
     "yolov8n.pt",  # Nano model (fastest)
     "yolov8s.pt",  # Small model (balanced)
     "yolov8m.pt",  # Medium model (most accurate)
-    "yolov8l.pt",  # Large model (most accurate but slower)
 ]
 
 YOLO_WEIGHTS = {model: DETECTION_MODEL_DIR / model for model in DETECTION_MODEL_LIST}
@@ -33,14 +33,36 @@ WEBRTC_CONFIG = {
     "STUN_SERVERS": [
         "stun:stun.l.google.com:19302",
         "stun:stun1.l.google.com:19302",
-        "stun:stun2.l.google.com:19302",
-        "stun:stun3.l.google.com:19302",
     ],
-    "TURN_SERVER_URL": os.getenv("TURN_SERVER_URL"),
-    "TURN_SERVER_USERNAME": os.getenv("TURN_SERVER_USERNAME"),
-    "TURN_SERVER_CREDENTIAL": os.getenv("TURN_SERVER_CREDENTIAL"),
-    "MAX_RETRIES": 3,
+    "RTCConfiguration": {
+        "iceServers": [
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {
+                "urls": ["turn:numb.viagenie.ca"],
+                "username": "webrtc@live.com",
+                "credential": "muazkh"
+            }
+        ],
+        "iceTransportPolicy": "all",
+        "bundlePolicy": "max-bundle",
+        "rtcpMuxPolicy": "require",
+        "iceCandidatePoolSize": 1
+    },
+    "MEDIA_STREAM_CONSTRAINTS": {
+        "video": {
+            "width": {"min": 320, "ideal": 640, "max": 1920},
+            "height": {"min": 240, "ideal": 480, "max": 1080},
+            "frameRate": {"ideal": 30, "max": 60},
+        },
+        "audio": False
+    },
+    "VIDEO_HTML_ATTRS": {
+        "style": {"width": "100%", "height": "auto"},
+        "controls": False,
+        "autoPlay": True,
+    },
     "TIMEOUT": 30,
+    "MAX_RETRIES": 3
 }
 
 PERFORMANCE_CONFIG = {

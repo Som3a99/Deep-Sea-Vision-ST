@@ -1,10 +1,12 @@
+# app.py
 import streamlit as st
 import cv2
 import logging
 import av
 import os
+import warnings
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration, VideoProcessorBase
-from utils import load_model, infer_uploaded_image, infer_uploaded_video, cleanup_memory, MemoryManager
+from utils import ModelManager, ImageProcessor, MemoryManager, cleanup_memory, infer_uploaded_image, infer_uploaded_video
 from config import YOLO_WEIGHTS, SOURCES_LIST, APP_CONFIG, WEBRTC_CONFIG
 import threading
 import numpy as np
@@ -16,7 +18,12 @@ import gc
 import torch
 from collections import defaultdict
 import time
-import json
+from torch.serialization import SourceChangeWarning
+
+# Suppress specific warnings
+warnings.filterwarnings("ignore", category=SourceChangeWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+warnings.filterwarnings("ignore", message=".*'torch.load' with 'weights_only=False'.*")
 
 # Enhanced logging configuration
 logging.basicConfig(
@@ -89,42 +96,9 @@ class VideoProcessor(VideoProcessorBase):
         """Handle errors with exponential backoff"""
         self.error_count[error_type] += 1
         wait_time = min(2 ** self.error_count[error_type], 30)
-        
         logger.error(f"{error_type} error: {error}. Waiting {wait_time}s before retry.")
         time.sleep(wait_time)
-        
-        if self.error_count[error_type] >= self.config.max_retries:
-            logger.critical(f"Maximum retries exceeded for {error_type}")
-            return False
-        return True
-
-    def _process_frame(self, img: np.ndarray) -> np.ndarray:
-        """Process a single frame with caching"""
-        frame_hash = hash(img.tobytes())
-        if frame_hash in self.results_cache:
-            return self.results_cache[frame_hash]
-
-        start_time = perf_counter()
-        try:
-            results = self.model.predict(
-                img,
-                conf=self.confidence,
-                batch=self.config.batch_size
-            )
-            processed = results[0].plot()
-            self.results_cache[frame_hash] = processed
-            
-            # Limit cache size
-            if len(self.results_cache) > 100:
-                self.results_cache.pop(next(iter(self.results_cache)))
-                
-            self._update_metrics(start_time)
-            return processed
-
-        except Exception as e:
-            if not self._handle_error("prediction", e):
-                return img
-            return self.last_result if self.last_result is not None else img
+        return self.error_count[error_type] < self.config.max_retries
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
         """Process incoming frames with improved error recovery"""
@@ -132,7 +106,6 @@ class VideoProcessor(VideoProcessorBase):
             self.frame_count += 1
             img = frame.to_ndarray(format="bgr24")
             
-            # Skip frames based on interval
             if (self.frame_count % self.config.process_interval != 0 or
                 perf_counter() - self.last_process_time < self.config.timeout):
                 return av.VideoFrame.from_ndarray(
@@ -141,10 +114,24 @@ class VideoProcessor(VideoProcessorBase):
                 )
 
             with self.lock:
-                processed = self._process_frame(img)
-                self.last_result = processed
-                self.last_process_time = perf_counter()
-                self.error_count.clear()
+                start_time = perf_counter()
+                try:
+                    results = self.model.predict(
+                        img,
+                        conf=self.confidence,
+                        batch=self.config.batch_size
+                    )
+                    processed = results[0].plot()
+                    self.last_result = processed
+                    self.last_process_time = perf_counter()
+                    self._update_metrics(start_time)
+                    self.error_count.clear()
+                    
+                except Exception as e:
+                    if self._handle_error("prediction", e):
+                        processed = self.last_result if self.last_result is not None else img
+                    else:
+                        raise RuntimeError("Maximum prediction retries exceeded")
 
             return av.VideoFrame.from_ndarray(processed, format="bgr24")
 
@@ -158,41 +145,31 @@ class VideoProcessor(VideoProcessorBase):
         """Return current performance metrics"""
         return self.performance_metrics
 
-def get_ice_servers():
-    """Get ICE servers with fallback and retry logic"""
-    ice_servers = [
-        {"urls": WEBRTC_CONFIG["STUN_SERVERS"]},
-    ]
-    
-    # Add TURN servers if configured
-    turn_servers = os.environ.get("TURN_SERVERS")
-    if turn_servers:
-        try:
-            additional_servers = json.loads(turn_servers)
-            ice_servers.extend(additional_servers)
-        except Exception as e:
-            logger.error(f"Failed to load TURN servers: {e}")
-    
-    return ice_servers
-
 def initialize_webrtc(confidence: float, model: YOLO):
-    """Initialize WebRTC with connection monitoring"""
-    config = ProcessingConfig.create()
-    
+    """Initialize WebRTC with improved error handling and timeout management"""
     try:
+        rtc_configuration = RTCConfiguration(
+            {"iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                {
+                    "urls": ["turn:numb.viagenie.ca"],
+                    "username": "webrtc@live.com",
+                    "credential": "muazkh"
+                }
+            ]}
+        )
+
         webrtc_ctx = webrtc_streamer(
             key="underwater-detection",
             mode=WebRtcMode.SENDRECV,
-            rtc_configuration=RTCConfiguration(
-                {"iceServers": get_ice_servers()}
-            ),
+            rtc_configuration=rtc_configuration,
             video_processor_factory=lambda: VideoProcessor(confidence, model),
             async_processing=True,
             media_stream_constraints={
                 "video": {
-                    "width": {"min": 320, "ideal": config.resolution[0], "max": 1920},
-                    "height": {"min": 240, "ideal": config.resolution[1], "max": 1080},
-                    "frameRate": {"min": 5, "ideal": config.frame_rate, "max": 30}
+                    "width": {"min": 320, "ideal": 640, "max": 1280},
+                    "height": {"min": 240, "ideal": 480, "max": 720},
+                    "frameRate": {"ideal": 15, "max": 30}
                 },
                 "audio": False
             },
@@ -200,139 +177,136 @@ def initialize_webrtc(confidence: float, model: YOLO):
                 "style": {"width": "100%", "height": "auto"},
                 "controls": False,
                 "autoPlay": True,
-            }
+            },
+            timeout=20.0,
         )
-        
-        if webrtc_ctx.state.playing:
-            st.success("WebRTC stream started successfully")
-            
-            # Display connection status
+
+        if webrtc_ctx.video_processor:
             if webrtc_ctx.state.playing:
-                st.info("Connection established successfully")
+                st.success("WebRTC connection established successfully")
                 
-                # Display performance metrics
+                # Display metrics if available
                 if hasattr(webrtc_ctx.video_processor, 'get_metrics'):
                     metrics = webrtc_ctx.video_processor.get_metrics()
                     st.sidebar.markdown("### Performance Metrics")
                     st.sidebar.text(f"FPS: {metrics['fps']:.1f}")
                     st.sidebar.text(f"Latency: {metrics['latency']:.0f}ms")
                     st.sidebar.text(f"Memory: {metrics['memory_usage']:.0f}MB")
-                    
-            elif webrtc_ctx.state.failed:
-                st.error("Connection failed. Please check your network connection and try again.")
             
+            elif webrtc_ctx.state.failed:
+                return use_fallback_camera(confidence, model)
+
         return webrtc_ctx
-        
+
     except Exception as e:
         logger.error(f"WebRTC initialization error: {e}")
-        st.error("""
-            Failed to initialize webcam stream. Please try:
-            1. Checking your camera permissions
-            2. Using a different browser
-            3. Using image/video upload instead
-        """)
+        return use_fallback_camera(confidence, model)
+
+def use_fallback_camera(confidence: float, model: YOLO):
+    """Fallback to OpenCV camera capture"""
+    st.warning("Switching to fallback camera mode...")
+    try:
+        cap = cv2.VideoCapture(0)
+        if not cap.isOpened():
+            st.error("Could not open camera")
+            return None
+
+        stframe = st.empty()
+        stop_button = st.button("Stop Camera")
+
+        while not stop_button:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            results = model.predict(frame, conf=confidence)
+            processed_frame = results[0].plot()
+            
+            stframe.image(
+                cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB),
+                caption="Live Feed",
+                use_container_width=True
+            )
+
+        cap.release()
+        return None
+
+    except Exception as e:
+        logger.error(f"Fallback camera error: {e}")
+        st.error("Camera access failed. Please try using image or video upload.")
         return None
 
 def initialize_app():
     """Initialize Streamlit application with enhanced error handling"""
+    st.set_page_config(
+        page_title=APP_CONFIG["title"],
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+
+    st.title(APP_CONFIG["title"])
+    
+    # Initialize session state
+    if 'error_count' not in st.session_state:
+        st.session_state.error_count = 0
+    if 'model_loaded' not in st.session_state:
+        st.session_state.model_loaded = False
+    
+    # Sidebar configuration
+    with st.sidebar:
+        model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
+        confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
+        
+        # System information
+        st.markdown("### System Info")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            current_mem = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+            available_mem = psutil.virtual_memory().available / (1024 * 1024)
+            st.metric("Memory Usage", f"{current_mem:.0f}MB")
+            st.metric("Available Memory", f"{available_mem:.0f}MB")
+            
+        with col2:
+            device = 'CUDA' if torch.cuda.is_available() else 'CPU'
+            st.metric("Device", device)
+            if torch.cuda.is_available():
+                gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**2)
+                st.metric("GPU Memory", f"{gpu_mem:.0f}MB")
+        
+        if available_mem < APP_CONFIG["memory_threshold"]:
+            st.warning("Low memory available. Performance may be affected.")
+            
+        # Advanced settings
+        with st.expander("Advanced Settings"):
+            st.slider("Batch Size", 1, 4, 1, key="batch_size")
+            st.slider("Frame Skip", 1, 5, 2, key="frame_skip")
+            st.checkbox("Enable Debug Mode", key="debug_mode")
+
     try:
-        st.set_page_config(
-            page_title=APP_CONFIG["title"],
-            layout="wide",
-            initial_sidebar_state="expanded"
-        )
-
-        st.markdown("""
-            <style>
-            .stApp {
-                max-width: 1200px;
-                margin: 0 auto;
-            }
-            .stButton>button {
-                width: 100%;
-            }
-            .stProgress > div > div {
-                background-color: #2ea043;
-            }
-            .metrics-container {
-                background-color: #f0f2f6;
-                padding: 1rem;
-                border-radius: 0.5rem;
-                margin: 1rem 0;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-
-        st.title(APP_CONFIG["title"])
+        with st.spinner("Loading model..."):
+            model = ModelManager.load_model(str(YOLO_WEIGHTS[model_type]))
+            if model is None:
+                st.error("Failed to load model. Please check the model path.")
+                st.stop()
+            st.session_state.model_loaded = True
         
-        # Initialize session state
-        if 'error_count' not in st.session_state:
-            st.session_state.error_count = 0
-        if 'model_loaded' not in st.session_state:
-            st.session_state.model_loaded = False
-        
-        # Sidebar configuration
-        with st.sidebar:
-            model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
-            confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
-            
-            # System information
-            st.markdown("### System Info")
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                current_mem = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
-                available_mem = psutil.virtual_memory().available / (1024 * 1024)
-                st.metric("Memory Usage", f"{current_mem:.0f}MB")
-                st.metric("Available Memory", f"{available_mem:.0f}MB")
-                
-            with col2:
-                device = 'CUDA' if torch.cuda.is_available() else 'CPU'
-                st.metric("Device", device)
-                if torch.cuda.is_available():
-                    gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**2)
-                    st.metric("GPU Memory", f"{gpu_mem:.0f}MB")
-            
-            if available_mem < APP_CONFIG["memory_threshold"]:
-                st.warning("Low memory available. Performance may be affected.")
-                
-            # Advanced settings
-            with st.expander("Advanced Settings"):
-                batch_size = st.slider("Batch Size", 1, 4, 1)
-                frame_skip = st.slider("Frame Skip", 1, 5, 2)
-                st.checkbox("Enable Debug Mode", key="debug_mode")
+        source_type = st.sidebar.selectbox("Input Source", SOURCES_LIST)
+        return model, confidence, source_type
 
-        try:
-            with st.spinner("Loading model..."):
-                model = load_model(str(YOLO_WEIGHTS[model_type]))
-                if model is None:
-                    st.error("Failed to load model. Please check the model path.")
-                    st.stop()
-                st.session_state.model_loaded = True
-            
-            source_type = st.sidebar.selectbox("Input Source", SOURCES_LIST)
-            return model, confidence, source_type
-
-        except Exception as e:
-            logger.error(f"Initialization error: {e}")
-            st.error("Failed to initialize application. Please refresh the page.")
-            cleanup_memory()
-            st.stop()
-            
     except Exception as e:
-        logger.error(f"Application setup error: {e}")
-        st.error("Critical error during setup. Please contact support.")
+        logger.error(f"Initialization error: {e}")
+        st.error("Failed to initialize application. Please refresh the page.")
+        cleanup_memory()
         st.stop()
 
 def main():
-    """Main application function with enhanced error handling and monitoring"""
+    """Main application function"""
     try:
-        # Initialize performance monitoring
         start_time = time.time()
         
         model, confidence, source_type = initialize_app()
         
-        # Display application metrics
         if st.session_state.get('debug_mode', False):
             st.sidebar.markdown("### Application Metrics")
             st.sidebar.text(f"Uptime: {time.time() - start_time:.1f}s")
@@ -340,57 +314,24 @@ def main():
         
         if source_type == "Webcam":
             st.info("Initializing webcam stream... This may take a few moments.")
-            
-            # Try WebRTC first
             webrtc_ctx = initialize_webrtc(confidence, model)
             
-            if not webrtc_ctx and st.session_state.error_count < 3:
-                st.warning("Attempting fallback to standard webcam...")
-                try:
-                    cap = cv2.VideoCapture(0)
-                    if not cap.isOpened():
-                        raise RuntimeError("Failed to open webcam")
-                    
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                            
-                        results = model.predict(frame, conf=confidence)
-                        st.image(
-                            cv2.cvtColor(results[0].plot(), cv2.COLOR_BGR2RGB),
-                            caption="Webcam Feed",
-                            use_column_width=True
-                        )
-                        
-                        if st.button("Stop"):
-                            break
-                            
-                    cap.release()
-                    
-                except Exception as e:
-                    logger.error(f"Fallback webcam error: {e}")
-                    st.error("Webcam capture failed. Please try using image or video upload.")
-                    st.session_state.error_count += 1
-                    
+            if not webrtc_ctx:
+                st.warning("""
+                    Webcam initialization failed. Please try:
+                    1. Using a different browser (Chrome recommended)
+                    2. Checking camera permissions
+                    3. Using Image or Video upload instead
+                """)
+                
         elif source_type == "Image":
             infer_uploaded_image(confidence, model)
         elif source_type == "Video":
             infer_uploaded_video(confidence, model)
 
-        # Memory management
-        if MemoryManager.check_memory() < APP_CONFIG["memory_threshold"]:
-            cleanup_memory()
-
     except Exception as e:
         logger.error(f"Application error: {e}")
         st.error("An error occurred. Please refresh the page.")
-        cleanup_memory()
-        
-    finally:
-        # Cleanup and metrics logging
-        if st.session_state.get('debug_mode', False):
-            st.sidebar.text(f"Total Runtime: {time.time() - start_time:.1f}s")
         cleanup_memory()
 
 if __name__ == "__main__":

@@ -6,13 +6,27 @@ textColor = "#24292e"
 font = "sans serif"
 
 [server]
+enableCORS = true
+enableXsrfProtection = false
 maxUploadSize = 200
-enableXsrfProtection = true
-enableCORS = false
+
 
 [browser]
-serverAddress = "0.0.0.0"
-serverPort = 8501
+gatherUsageStats = false
 
 [runner]
 magicEnabled = true
+fastReruns = true
+
+[client]
+showErrorDetails = true
+toolbarMode = "auto"
+
+[logger]
+level = "info"
+messageFormat = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+[deprecation]
+showfileUploaderEncoding = false
+showImageFormat = false
+showPyplotGlobalUse = false
