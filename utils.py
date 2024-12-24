@@ -118,3 +118,48 @@ def infer_uploaded_image(conf: float, model: YOLO):
                         st.write(metrics)
         except Exception as e:
             st.error(f"An error occurred: {e}")
+            
+def infer_uploaded_video(conf: float, model: YOLO):
+    
+    uploaded_file = st.file_uploader(
+        "Upload a video",
+        type=APP_CONFIG["supported_video_types"],
+        help=f"Supported formats: {', '.join(APP_CONFIG['supported_video_types']).upper()}"
+    )
+    
+    if uploaded_file:
+        try:
+            if uploaded_file.size > APP_CONFIG["max_upload_size"] * 1024 * 1024:
+                st.error(f"File too large. Maximum size is {APP_CONFIG['max_upload_size']}MB")
+                return
+
+            with st.spinner("Processing video..."):
+                video_path = save_uploaded_file(uploaded_file)
+                cap = cv2.VideoCapture(video_path)
+                frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                
+                progress_bar = st.progress(0)
+                frame_num = 0
+                
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+                    
+                    with MemoryManager.monitor_memory():
+                        frame, _ = process_video_frame(frame, model, conf)
+                        frame_num += 1
+                        progress = (frame_num / frame_count) * 100
+                        progress_bar.progress(progress)
+                        
+                    st.image(
+                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+                        caption="Processed Frame",
+                        use_column_width=True
+                    )
+                    
+                cap.release()
+                os.remove(video_path)
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+            
