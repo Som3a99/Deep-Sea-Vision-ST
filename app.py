@@ -10,7 +10,7 @@ import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
-from typing import Optional, Dict
+from typing import Optional
 from dataclasses import dataclass
 from ultralytics import YOLO
 from time import perf_counter
@@ -18,37 +18,8 @@ import psutil
 import gc
 import torch
 from collections import defaultdict
-import tempfile
 
-# Memory management utilities
-def get_memory_usage():
-    """Get current memory usage in MB"""
-    process = psutil.Process(os.getpid())
-    return process.memory_info().rss / (1024 * 1024)
-
-def cleanup_memory():
-    """Force garbage collection and release unused memory"""
-    gc.collect()
-    if torch.cuda.is_available():
-        try:
-            torch.cuda.empty_cache()
-            torch.cuda.ipc_collect()
-        except Exception as e:
-            logger.warning(f"CUDA cleanup failed: {e}")
-
-def manage_memory(max_mem_mb: int = 4096):
-    """Manage memory usage with fallbacks"""
-    try:
-        current_mem = get_memory_usage()
-        if current_mem > max_mem_mb:
-            cleanup_memory()
-            current_mem = get_memory_usage()
-            if current_mem > max_mem_mb:
-                logger.warning(f"High memory usage: {current_mem:.0f}MB")
-    except Exception as e:
-        logger.error(f"Memory management error: {e}")
-
-# Enhanced logging
+# Enhanced logging configuration
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -59,156 +30,189 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-error_count = defaultdict(int)
-def log_error_once(message: str):
-    """Log an error message only once"""
-    if error_count[message] < 1:
-        logger.error(message)
-    error_count[message] += 1
+class ResourceManager:
+    """Manages system resources and configurations"""
+    def __init__(self, max_mem_mb: int = 4096):
+        self.max_mem_mb = max_mem_mb
+        self.error_count = defaultdict(int)
+    
+    @staticmethod
+    def get_memory_usage() -> float:
+        """Get current memory usage in MB"""
+        return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    
+    def cleanup_memory(self):
+        """Force garbage collection and clear CUDA cache"""
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    
+    def check_memory(self):
+        """Monitor and manage memory usage"""
+        current_mem = self.get_memory_usage()
+        if current_mem > self.max_mem_mb:
+            self.cleanup_memory()
+            return False
+        return True
+    
+    def log_error(self, message: str):
+        """Log errors with count limiting"""
+        if self.error_count[message] < 3:  # Log only first 3 occurrences
+            logger.error(message)
+        self.error_count[message] += 1
 
 @dataclass
 class ProcessingConfig:
-    """Configuration class for video processing parameters"""
-    def __init__(self):
-        self.update_config()
-    
-    def update_config(self):
-        """Update configuration based on system resources"""
+    """Dynamic configuration based on system resources"""
+    frame_rate: int
+    process_interval: int
+    resolution: tuple
+    thread_pool_size: int
+    queue_size: int
+    batch_size: int
+    timeout: float
+
+    @classmethod
+    def create(cls):
         try:
             cpu_count = psutil.cpu_count(logical=False) or 1
-            available_memory = psutil.virtual_memory().available / (1024 * 1024)  # MB
+            mem_available = psutil.virtual_memory().available / (1024 * 1024)
             
-            self.FRAME_RATE = min(10, max(5, int(available_memory / 1024)))
-            self.PROCESS_EVERY_N_FRAMES = max(2, int(10 / self.FRAME_RATE))
-            self.MAX_RESOLUTION = (
-                min(480, int(available_memory / 10)),
-                min(360, int(available_memory / 15))
+            return cls(
+                frame_rate=min(15, max(5, int(mem_available / 512))),
+                process_interval=2,
+                resolution=(640, 480),  # More reasonable default resolution
+                thread_pool_size=min(cpu_count, 4),
+                queue_size=3,
+                batch_size=1,
+                timeout=0.1
             )
-            self.THREAD_POOL_SIZE = min(cpu_count, 2)
-            self.MAX_QUEUE_SIZE = max(3, min(5, int(available_memory / 1024)))
-            self.BATCH_SIZE = 1
-            self.MAX_RETRIES = 3
-            self.TIMEOUT = max(0.1, 1.0 / self.FRAME_RATE)
         except Exception as e:
-            log_error_once(f"Error updating config: {e}")
-            # Fallback to conservative defaults
-            self.FRAME_RATE = 5
-            self.PROCESS_EVERY_N_FRAMES = 3
-            self.MAX_RESOLUTION = (320, 240)
-            self.THREAD_POOL_SIZE = 1
-            self.MAX_QUEUE_SIZE = 3
-            self.BATCH_SIZE = 1
-            self.MAX_RETRIES = 3
-            self.TIMEOUT = 0.2
+            logger.warning(f"Using fallback configuration: {e}")
+            return cls(
+                frame_rate=5,
+                process_interval=3,
+                resolution=(320, 240),
+                thread_pool_size=1,
+                queue_size=2,
+                batch_size=1,
+                timeout=0.2
+            )
 
-class YOLOProcessor:
-    def __init__(self, confidence: float, model):
-        self.config = ProcessingConfig()
-        self._confidence = confidence
-        self._model = model
-        self._frame_count = 0
-        self._error_count = 0
-        self._last_result = None
-        self._last_process_time = perf_counter()
-        self._lock = threading.Lock()
-        
-    def _process_frame(self, frame: np.ndarray) -> np.ndarray:
-        """Process a single frame with error handling"""
+class VideoProcessor:
+    """Handles video processing with YOLO model"""
+    def __init__(self, confidence: float, model: YOLO):
+        self.config = ProcessingConfig.create()
+        self.confidence = confidence
+        self.model = model
+        self.resource_manager = ResourceManager()
+        self.frame_count = 0
+        self.last_result = None
+        self.last_process_time = perf_counter()
+        self.lock = threading.Lock()
+
+    def process_frame(self, frame: np.ndarray) -> np.ndarray:
+        """Process a single frame with error handling and resource management"""
         try:
-            current_time = perf_counter()
-            if current_time - self._last_process_time < self.config.TIMEOUT:
-                return self._last_result if self._last_result is not None else frame
+            if not self.resource_manager.check_memory():
+                return self.last_result if self.last_result is not None else frame
 
-            results = self._model.predict(
+            current_time = perf_counter()
+            if current_time - self.last_process_time < self.config.timeout:
+                return self.last_result if self.last_result is not None else frame
+
+            results = self.model.predict(
                 frame,
-                conf=self._confidence,
-                batch=self.config.BATCH_SIZE,
+                conf=self.confidence,
+                batch=self.config.batch_size
             )
             
             processed_frame = results[0].plot()
-            self._last_process_time = current_time
+            self.last_process_time = current_time
+            self.last_result = processed_frame
             return processed_frame
 
         except Exception as e:
-            log_error_once(f"Frame processing error: {e}")
-            self._error_count += 1
-            return self._last_result if self._last_result is not None else frame
+            self.resource_manager.log_error(f"Frame processing error: {e}")
+            return self.last_result if self.last_result is not None else frame
 
     def recv(self, frame: av.VideoFrame) -> av.VideoFrame:
-        """Receive and process frames"""
-        if self._error_count >= self.config.MAX_RETRIES:
-            log_error_once("Too many errors, stopping processing")
-            return frame
-
+        """Handle incoming video frames"""
         try:
-            self._frame_count += 1
+            self.frame_count += 1
             img = frame.to_ndarray(format="bgr24")
 
-            if self._frame_count % self.config.PROCESS_EVERY_N_FRAMES != 0:
+            if self.frame_count % self.config.process_interval != 0:
                 return av.VideoFrame.from_ndarray(
-                    self._last_result if self._last_result is not None else img,
+                    self.last_result if self.last_result is not None else img,
                     format="bgr24"
                 )
 
-            with self._lock:
-                processed = self._process_frame(img)
-                self._last_result = processed
+            with self.lock:
+                processed = self.process_frame(img)
 
             return av.VideoFrame.from_ndarray(processed, format="bgr24")
 
         except Exception as e:
-            log_error_once(f"Frame receive error: {e}")
+            self.resource_manager.log_error(f"Frame receive error: {e}")
             return frame
 
-def initialize_sidebar():
-    """Initialize Streamlit sidebar for user settings"""
-    model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
-    confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
-    
-    current_mem = get_memory_usage()
-    st.sidebar.markdown("### System Info")
-    st.sidebar.text(f"Memory Usage: {current_mem:.0f}MB")
-    st.sidebar.text(f"Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
-
-    with st.spinner("Loading model..."):
-        model = load_model(str(YOLO_WEIGHTS[model_type]))
-    
-    if model is None:
-        st.error("Failed to load model. Please check the model path and try again.")
-        st.stop()
-
-    source_type = st.selectbox("Input Source", SOURCES_LIST)
-    return model, confidence, source_type
-
-def main():
-    manage_memory()
+def initialize_app():
+    """Initialize Streamlit application with error handling"""
     st.set_page_config(
         page_title="Underwater Object Detection",
         layout="wide",
         initial_sidebar_state="expanded"
     )
 
-    model, confidence, source_type = initialize_sidebar()
+    model_type = st.sidebar.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
+    confidence = st.sidebar.slider("Confidence", 0.0, 1.0, 0.5)
+    
+    # System information display
+    resource_manager = ResourceManager()
+    current_mem = resource_manager.get_memory_usage()
+    st.sidebar.markdown("### System Info")
+    st.sidebar.text(f"Memory Usage: {current_mem:.0f}MB")
+    st.sidebar.text(f"Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
 
     try:
+        with st.spinner("Loading model..."):
+            model = load_model(str(YOLO_WEIGHTS[model_type]))
+        
+        if model is None:
+            st.error("Failed to load model. Please check the model path.")
+            st.stop()
+            
+        source_type = st.sidebar.selectbox("Input Source", SOURCES_LIST)
+        return model, confidence, source_type
+
+    except Exception as e:
+        logger.error(f"Initialization error: {e}")
+        st.error("Failed to initialize application. Please refresh the page.")
+        st.stop()
+
+def main():
+    try:
+        model, confidence, source_type = initialize_app()
+        
         if source_type == "Webcam":
-            config = ProcessingConfig()
+            config = ProcessingConfig.create()
+            # Remove the problematic on_error parameter
             webrtc_ctx = webrtc_streamer(
                 key="underwater-detection",
                 mode=WebRtcMode.SENDRECV,
                 rtc_configuration=RTCConfiguration(
-                    iceServers=[{"urls": ["stun:stun.l.google.com:19302"]}]
+                    {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
                 ),
-                video_processor_factory=lambda: YOLOProcessor(confidence, model),
+                video_processor_factory=lambda: VideoProcessor(confidence, model),
                 async_processing=True,
                 media_stream_constraints={
                     "video": {
-                        "width": {"ideal": config.MAX_RESOLUTION[0]},
-                        "height": {"ideal": config.MAX_RESOLUTION[1]},
-                        "frameRate": {"ideal": min(config.FRAME_RATE, 30)}
-                    },
-                },
-                on_error=lambda e: st.error(f"Webcam initialization error: {e}")
+                        "width": {"ideal": config.resolution[0]},
+                        "height": {"ideal": config.resolution[1]},
+                        "frameRate": {"ideal": config.frame_rate}
+                    }
+                }
             )
         elif source_type == "Image":
             infer_uploaded_image(confidence, model)
@@ -216,9 +220,8 @@ def main():
             infer_uploaded_video(confidence, model)
 
     except Exception as e:
-        log_error_once(f"Main application error: {e}")
-        st.error("An error occurred. Please try refreshing the page or selecting a different input source.")
-        cleanup_memory()
+        logger.error(f"Application error: {e}")
+        st.error("An error occurred. Please refresh the page.")
 
 if __name__ == "__main__":
     main()

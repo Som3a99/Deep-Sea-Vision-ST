@@ -1,1 +1,28 @@
 2024-12-24 08:57:35,859 - __main__ - ERROR - Error loading model: local variable 'torch' referenced before assignment
+2024-12-24 09:37:33,373 - utils - INFO - Successfully loaded model from E:\ROV_Object_Detection\Deep-Sea-Vision-ST\weights\detection\yolov8n.pt
+2024-12-24 09:38:10,367 - streamlit_webrtc.webrtc - INFO - Track video received
+2024-12-24 09:38:10,368 - streamlit_webrtc.webrtc - INFO - Set <aiortc.rtcrtpreceiver.RemoteStreamTrack object at 0x000002B4C0F532B0> as an input video track with video_processor <class 'streamlit_webrtc.process.AsyncVideoProcessTrack'>
+2024-12-24 09:38:10,369 - streamlit_webrtc.webrtc - INFO - Add a track <streamlit_webrtc.process.AsyncVideoProcessTrack object at 0x000002B4C0F53A00> of kind video to <aiortc.rtcpeerconnection.RTCPeerConnection object at 0x000002B4C0E81900>
+2024-12-24 09:38:10,389 - aioice.ice - INFO - Connection(0) Could not bind to 169.254.133.93 - [WinError 10049] The requested address is not valid in its context
+2024-12-24 09:38:10,583 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:10,588 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:10,590 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:10,592 - aioice.ice - INFO - Connection(0) Check CandidatePair(('192.168.1.3', 61931) -> ('192.168.1.3', 62498)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:10,595 - streamlit_webrtc.webrtc - INFO - ICE connection state is checking
+2024-12-24 09:38:10,606 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:10,611 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:10,623 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:15,409 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.IN_PROGRESS -> State.SUCCEEDED
+2024-12-24 09:38:15,412 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 62499)) State.IN_PROGRESS -> State.SUCCEEDED
+2024-12-24 09:38:15,414 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:15,418 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:15,423 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 61929) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.IN_PROGRESS -> State.SUCCEEDED
+2024-12-24 09:38:15,433 - aioice.ice - INFO - Connection(0) Check CandidatePair(('192.168.1.3', 61931) -> ('192.168.1.3', 62498)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:15,448 - aioice.ice - INFO - Connection(0) Check CandidatePair(('fd64:6d6c:36bd:f00:215d:b8d2:f8a7:8de', 61930) -> ('fd64:6d6c:36bd:f00:a8c8:9832:ce5b:c47c', 62500)) State.IN_PROGRESS -> State.SUCCEEDED
+2024-12-24 09:38:15,482 - aioice.ice - INFO - Connection(0) Check CandidatePair(('192.168.1.3', 61931) -> ('192.168.1.3', 62498)) State.IN_PROGRESS -> State.SUCCEEDED
+2024-12-24 09:38:15,501 - aioice.ice - INFO - Connection(0) Check CandidatePair(('192.168.1.3', 61931) -> ('156.196.238.52', 62498)) State.FROZEN -> State.WAITING
+2024-12-24 09:38:15,534 - aioice.ice - INFO - Connection(0) Check CandidatePair(('192.168.1.3', 61931) -> ('156.196.238.52', 62498)) State.WAITING -> State.IN_PROGRESS
+2024-12-24 09:38:15,975 - aioice.ice - INFO - Connection(0) ICE completed
+2024-12-24 09:38:15,987 - streamlit_webrtc.webrtc - INFO - ICE connection state is completed
+2024-12-24 09:38:18,822 - streamlit_webrtc.process - WARNING - Some frames have been dropped. `recv_queued` is recommended to use instead.
+2024-12-24 09:39:02,532 - streamlit_webrtc.webrtc - INFO - Track video ended
