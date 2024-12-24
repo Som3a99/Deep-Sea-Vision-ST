@@ -1,5 +1,18 @@
+[theme]
+primaryColor = "#2ea043"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f8fa"
+textColor = "#24292e"
+font = "sans serif"
+
 [server]
 maxUploadSize = 200
 enableXsrfProtection = true
+enableCORS = false
+
 [browser]
-gatherUsageStats = false
+serverAddress = "0.0.0.0"
+serverPort = 8501
+
+[runner]
+magicEnabled = true
