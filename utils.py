@@ -75,27 +75,24 @@ class ModelManager:
     @staticmethod
     @st.cache_resource
     def load_model(model_path: str) -> Optional[YOLO]:
-        """Load YOLO model with improved caching and error handling"""
+        """Load YOLO model with improved error handling"""
         try:
+            model_path = Path(model_path)
+            if not model_path.exists():
+                st.error(f"Model file not found: {model_path}")
+                return None
+
             # Set torch configurations
             torch.backends.cudnn.benchmark = True
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            # Verify model file exists
-            if not Path(model_path).exists():
-                raise FileNotFoundError(f"Model file not found: {model_path}")
-            
             # Load model
-            model = YOLO(model_path)
+            model = YOLO(str(model_path))
             
             # Move model to appropriate device
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
             model.to(device)
-            
-            # Optimize model for inference
-            if device.type == 'cuda':
-                model.model.half()  # FP16 for faster inference
             
             logger.info(f"Successfully loaded model from {model_path} on {device}")
             return model
@@ -177,20 +174,25 @@ def cleanup_memory():
         logger.error(f"Error during memory cleanup: {e}")
 
 def infer_uploaded_image(conf: float, model: YOLO):
-    """Handle image upload and inference with enhanced error handling"""
+    """Handle image upload and inference with improved error handling"""
     uploaded_file = st.file_uploader(
         "Upload an image",
-        type=APP_CONFIG["supported_image_types"],
-        help=f"Supported formats: {', '.join(APP_CONFIG['supported_image_types']).upper()}"
+        type=APP_CONFIG["supported_image_types"]
     )
     
     if uploaded_file:
         try:
-            with st.spinner("Processing image..."):
-                # Process image
-                image = ImageProcessor.process_uploaded_image(uploaded_file)
+            # Create a temporary directory to save the image
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Save uploaded file
+                temp_path = os.path.join(temp_dir, uploaded_file.name)
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+                
+                # Read image using OpenCV
+                image = cv2.imread(temp_path)
                 if image is None:
-                    st.error("Failed to process uploaded image")
+                    st.error("Failed to load image")
                     return
 
                 # Create columns for display
@@ -204,61 +206,25 @@ def infer_uploaded_image(conf: float, model: YOLO):
                         use_container_width=True
                     )
                 
-                # Add detection button
                 if st.button("Detect Objects"):
-                    start_time = time.time()
-                    
-                    # Create progress bar
-                    progress_bar = st.progress(0)
-                    
-                    # Model inference
-                    results = model.predict(
-                        image,
-                        conf=conf,
-                        verbose=False
-                    )
-                    progress_bar.progress(50)
-                    
-                    # Process results
-                    processed_image = results[0].plot()
-                    
-                    # Display results
-                    with col2:
-                        st.image(
-                            cv2.cvtColor(processed_image, cv2.COLOR_BGR2RGB),
-                            caption="Detected Objects",
-                            use_container_width=True
-                        )
-                    
-                    # Calculate and display metrics
-                    process_time = time.time() - start_time
-                    progress_bar.progress(100)
-                    
-                    # Display metrics
-                    metrics = {
-                        "Process Time": f"{process_time:.2f}s",
-                        "Objects Detected": len(results[0].boxes),
-                        "Confidence Threshold": f"{conf:.2f}",
-                        "Memory Usage": f"{MemoryManager.get_memory_usage()['used']:.0f}MB"
-                    }
-                    
-                    # Display metrics in columns
-                    st.markdown("### Detection Metrics")
-                    cols = st.columns(len(metrics))
-                    for col, (metric, value) in zip(cols, metrics.items()):
-                        col.metric(metric, value)
-                    
-                    # Display detailed object information
-                    if len(results[0].boxes) > 0:
-                        st.markdown("### Detected Objects")
-                        for box in results[0].boxes:
-                            conf_val = box.conf.item()
-                            cls_name = results[0].names[box.cls.item()]
-                            st.text(f"{cls_name}: {conf_val:.2%} confidence")
+                    with st.spinner("Processing..."):
+                        # Model inference
+                        results = model.predict(image, conf=conf)
+                        
+                        # Display results
+                        with col2:
+                            st.image(
+                                cv2.cvtColor(results[0].plot(), cv2.COLOR_BGR2RGB),
+                                caption="Detected Objects",
+                                use_container_width=True
+                            )
+                        
+                        # Display metrics
+                        st.success(f"Found {len(results[0].boxes)} objects")
 
         except Exception as e:
             logger.error(f"Error processing image: {e}")
-            st.error("An error occurred while processing the image")
+            st.error("Error processing image")
             cleanup_memory()
 
 def infer_uploaded_video(conf: float, model: YOLO):

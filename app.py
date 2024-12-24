@@ -146,7 +146,7 @@ class VideoProcessor(VideoProcessorBase):
         return self.performance_metrics
 
 def initialize_webrtc(confidence: float, model: YOLO):
-    """Initialize WebRTC with improved error handling and timeout management"""
+    """Initialize WebRTC with improved error handling"""
     try:
         rtc_configuration = RTCConfiguration(
             {"iceServers": [
@@ -177,22 +177,12 @@ def initialize_webrtc(confidence: float, model: YOLO):
                 "style": {"width": "100%", "height": "auto"},
                 "controls": False,
                 "autoPlay": True,
-            },
-            timeout=20.0,
+            }
         )
 
         if webrtc_ctx.video_processor:
             if webrtc_ctx.state.playing:
                 st.success("WebRTC connection established successfully")
-                
-                # Display metrics if available
-                if hasattr(webrtc_ctx.video_processor, 'get_metrics'):
-                    metrics = webrtc_ctx.video_processor.get_metrics()
-                    st.sidebar.markdown("### Performance Metrics")
-                    st.sidebar.text(f"FPS: {metrics['fps']:.1f}")
-                    st.sidebar.text(f"Latency: {metrics['latency']:.0f}ms")
-                    st.sidebar.text(f"Memory: {metrics['memory_usage']:.0f}MB")
-            
             elif webrtc_ctx.state.failed:
                 return use_fallback_camera(confidence, model)
 
@@ -203,12 +193,12 @@ def initialize_webrtc(confidence: float, model: YOLO):
         return use_fallback_camera(confidence, model)
 
 def use_fallback_camera(confidence: float, model: YOLO):
-    """Fallback to OpenCV camera capture"""
+    """Fallback to OpenCV camera capture with improved error handling"""
     st.warning("Switching to fallback camera mode...")
     try:
         cap = cv2.VideoCapture(0)
         if not cap.isOpened():
-            st.error("Could not open camera")
+            st.error("Could not access webcam. Please check your camera permissions.")
             return None
 
         stframe = st.empty()
@@ -217,16 +207,24 @@ def use_fallback_camera(confidence: float, model: YOLO):
         while not stop_button:
             ret, frame = cap.read()
             if not ret:
+                st.error("Failed to capture frame from webcam")
                 break
 
-            results = model.predict(frame, conf=confidence)
-            processed_frame = results[0].plot()
-            
-            stframe.image(
-                cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB),
-                caption="Live Feed",
-                use_container_width=True
-            )
+            try:
+                results = model.predict(frame, conf=confidence)
+                processed_frame = results[0].plot()
+                
+                stframe.image(
+                    cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB),
+                    caption="Live Feed",
+                    use_container_width=True
+                )
+            except Exception as e:
+                logger.error(f"Error processing frame: {e}")
+                continue
+
+            # Add small delay to reduce CPU usage
+            time.sleep(0.01)
 
         cap.release()
         return None
