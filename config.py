@@ -29,25 +29,34 @@ APP_CONFIG = {
     "default_model": "yolov8s.pt",
 }
 
+# config.py
 WEBRTC_CONFIG = {
-    "STUN_SERVERS": [
-        "stun:stun.l.google.com:19302",
-        "stun:stun1.l.google.com:19302",
-    ],
     "RTCConfiguration": {
         "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
             {
-                "urls": ["turn:numb.viagenie.ca"],
-                "username": "webrtc@live.com",
-                "credential": "muazkh"
-            }
+                "urls": [
+                    "stun:stun.l.google.com:19302",
+                    "stun:stun1.l.google.com:19302",
+                    "stun:stun2.l.google.com:19302",
+                ],
+            },
+            {
+                "urls": [
+                    "turn:openrelay.metered.ca:80",
+                ],
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
+            },
+            {
+                "urls": [
+                    "turn:openrelay.metered.ca:443",
+                ],
+                "username": "openrelayproject",
+                "credential": "openrelayproject",
+            },
         ],
         "iceTransportPolicy": "all",
-        "bundlePolicy": "max-bundle",
-        "rtcpMuxPolicy": "require",
-        "iceCandidatePoolSize": 1
-    },
+                    },
     "MEDIA_STREAM_CONSTRAINTS": {
         "video": {
             "width": {"min": 320, "ideal": 640, "max": 1920},
