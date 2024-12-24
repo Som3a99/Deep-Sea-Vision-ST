@@ -163,3 +163,97 @@ def infer_uploaded_video(conf: float, model: YOLO):
         except Exception as e:
             st.error(f"An error occurred: {e}")
             
+def save_uploaded_file(uploaded_file):
+    """Save uploaded file to temporary directory"""
+    temp_dir = tempfile.mkdtemp()
+    file_path = os.path.join(temp_dir, uploaded_file.name)
+    
+    with open(file_path, "wb") as f:
+        f.write(uploaded_file.read())
+        
+    return file_path
+
+def cleanup_memory():
+    """Perform memory cleanup by collecting garbage and releasing memory"""
+    gc.collect()
+    torch.cuda.empty_cache()
+    logger.info("Memory cleanup performed")
+    
+def infer_webcam_image(conf: float, model: YOLO):
+    """Handle webcam image capture and inference"""
+    st.write("Webcam Capture")
+    st.write("Press 'Capture' to take a photo")
+    
+    if st.button("Capture"):
+        cap = cv2.VideoCapture(0)
+        
+        if not cap.isOpened():
+            st.error("Error: Could not open webcam")
+            return
+        
+        ret, frame = cap.read()
+        cap.release()
+        
+        if ret:
+            with st.spinner("Processing image..."):
+                st.image(
+                    cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+                    caption="Captured Image",
+                    use_column_width=True
+                )
+                
+                results = model.predict(frame, conf=conf)
+                st.image(
+                    cv2.cvtColor(results[0].plot(), cv2.COLOR_BGR2RGB),
+                    caption="Detected Objects",
+                    use_column_width=True
+                )
+        else:
+            st.error("Error: Could not capture image")
+            
+def initialize_webrtc(conf: float, model: YOLO):
+    """Initialize webcam stream using WebRTC"""
+    webrtc_ctx = st.webrtc_streamer(
+        key="example",
+        video_transformer_func=lambda frame: process_video_frame(frame, model, conf)[0],
+        desired_fps=30,
+        client_settings={"maxWidth": 640, "maxHeight": 480},
+    )
+    
+    return webrtc_ctx
+
+def initialize_app() -> Tuple[YOLO, float, str]:
+    """Initialize the application with model selection and source type"""
+    with st.sidebar:
+        model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
+        confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
+        
+        # System information
+        st.markdown("### System Info")
+        current_mem = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+        available_mem = psutil.virtual_memory().available / (1024 * 1024)
+        
+        st.text(f"Memory Usage: {current_mem:.0f}MB")
+        st.text(f"Available Memory: {available_mem:.0f}MB")
+        st.text(f"Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
+        
+        if available_mem < 1000:  # Less than 1GB available
+            st.warning("Low memory available. Performance may be affected.")
+            
+    try:
+        with st.spinner("Loading model..."):
+            model = load_model(str(YOLO_WEIGHTS[model_type]))
+            if model is None:
+                st.error("Failed to load model. Please check the model path.")
+                st.stop()
+            
+        source_type = st.sidebar.selectbox("Input Source", SOURCES_LIST)
+        return model, confidence, source_type
+
+    except Exception as e:
+        logger.error(f"Initialization error: {e}")
+        st.error("Failed to initialize application. Please refresh the page.")
+        cleanup_memory()
+        st.stop()
+        
+        
