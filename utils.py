@@ -112,3 +112,7 @@ def infer_uploaded_image(conf: float, model: YOLO):
                         # Display metrics
                         metrics = {
                             "Process Time": f"{process_time:.2f}s
+                            }
+                        st.write(metrics)
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
