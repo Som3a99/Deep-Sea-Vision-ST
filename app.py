@@ -17,7 +17,8 @@ from ultralytics import YOLO
 from time import perf_counter
 import psutil
 import gc
-import torch
+import torch  # Add torch import at the top
+
 # Memory management utilities
 def get_memory_usage():
     """Get current memory usage in MB"""
@@ -27,13 +28,14 @@ def get_memory_usage():
 def cleanup_memory():
     """Force garbage collection and release unused memory"""
     gc.collect()
-    if hasattr(torch, 'cuda'):
+    
+    # Only attempt CUDA cleanup if torch is available and CUDA is enabled
+    if torch.cuda.is_available():
         try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+        except Exception as e:
+            logger.warning(f"CUDA cleanup failed: {e}")
 
 def manage_memory(max_mem_mb: int = 4096):
     """Manage memory usage with fallbacks"""
@@ -63,54 +65,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-@dataclass
-class ProcessingConfig:
-    """Configuration for processing with adaptive parameters"""
-    def __init__(self):
-        self.update_config()
-    
-    def update_config(self):
-        """Update configuration based on system resources"""
-        try:
-            cpu_count = psutil.cpu_count(logical=False) or 1
-            available_memory = psutil.virtual_memory().available / (1024 * 1024)  # MB
-            
-            # Adjust parameters based on available memory
-            self.FRAME_RATE = min(10, max(5, int(available_memory / 1024)))
-            self.PROCESS_EVERY_N_FRAMES = max(2, int(10 / self.FRAME_RATE))
-            self.MAX_RESOLUTION = (
-                min(480, int(available_memory / 10)),
-                min(360, int(available_memory / 15))
-            )
-            self.THREAD_POOL_SIZE = min(cpu_count, 2)
-            self.MAX_QUEUE_SIZE = max(3, min(5, int(available_memory / 1024)))
-            self.BATCH_SIZE = 1
-            self.MAX_RETRIES = 3
-            self.TIMEOUT = 1.0 / self.FRAME_RATE
-            
-        except Exception as e:
-            logger.error(f"Error updating config: {e}")
-            # Fallback to conservative defaults
-            self.FRAME_RATE = 5
-            self.PROCESS_EVERY_N_FRAMES = 3
-            self.MAX_RESOLUTION = (320, 240)
-            self.THREAD_POOL_SIZE = 1
-            self.MAX_QUEUE_SIZE = 3
-            self.BATCH_SIZE = 1
-            self.MAX_RETRIES = 3
-            self.TIMEOUT = 0.2
-
 @st.cache_resource(ttl=3600)  # Cache for 1 hour
 def get_yolo_model(model_path: str) -> Optional[YOLO]:
     """Load and cache YOLO model with memory management"""
     try:
         cleanup_memory()  # Clean up before loading model
         logger.info(f"Loading model from {model_path}")
+        
+        # Verify model file exists
+        if not os.path.exists(model_path):
+            logger.error(f"Model file not found: {model_path}")
+            return None
+            
+        # Load model with device selection
+        device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
         model = YOLO(model_path)
-        model.fuse()  # Fuse layers for better inference speed
+        model.to(device)
+        
+        # Optional: Fuse layers for better inference speed
+        try:
+            model.fuse()
+        except Exception as e:
+            logger.warning(f"Model fusion failed (non-critical): {e}")
+            
         return model
+        
     except Exception as e:
-        logger.error(f"Error loading model: {e}")
+        logger.error(f"Error loading model: {str(e)}")
+        cleanup_memory()  # Cleanup after failed load
         return None
 
 class WebRTCStats:
@@ -249,17 +231,21 @@ def main():
         model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
         confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
         
-        # Show memory usage
+        # Show memory usage and device info
         current_mem = get_memory_usage()
-        st.sidebar.markdown(f"Memory Usage: {current_mem:.0f}MB")
+        st.sidebar.markdown("### System Info")
+        st.sidebar.text(f"Memory Usage: {current_mem:.0f}MB")
+        st.sidebar.text(f"Device: {'CUDA' if torch.cuda.is_available() else 'CPU'}")
         
-        model = get_yolo_model(str(YOLO_WEIGHTS[model_type]))
-        if not model:
-            st.error("Model loading failed")
+        # Load model with progress indicator
+        with st.spinner("Loading model..."):
+            model = get_yolo_model(str(YOLO_WEIGHTS[model_type]))
+            
+        if model is None:
+            st.error("Failed to load model. Please check the model path and try again.")
             return
 
         source_type = st.selectbox("Input Source", SOURCES_LIST)
-
     # Main content area with error handling and memory management
     try:
         if source_type == "Webcam":
