@@ -4,7 +4,7 @@ import cv2
 import logging
 import av
 import os
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, RTCConfiguration
+from streamlit_webrtec import webrtc_streamer, WebRtcMode, RTCConfiguration
 from utils import load_model, infer_uploaded_image, infer_uploaded_video
 from config import YOLO_WEIGHTS, SOURCES_LIST
 import queue
@@ -15,15 +15,37 @@ from typing import Optional, Dict
 from dataclasses import dataclass
 from ultralytics import YOLO
 from time import perf_counter
-import resource
 import psutil
+import gc
 
-# Memory limiter to prevent OOM issues
-def limit_memory(max_mem_gb: float = 4.0):
-    """Limit maximum memory usage to prevent OOM crashes"""
-    max_mem = max_mem_gb * 1024 * 1024 * 1024  # Convert GB to bytes
-    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
-    resource.setrlimit(resource.RLIMIT_AS, (max_mem, hard))
+# Memory management utilities
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    process = psutil.Process(os.getpid())
+    return process.memory_info().rss / (1024 * 1024)
+
+def cleanup_memory():
+    """Force garbage collection and release unused memory"""
+    gc.collect()
+    if hasattr(torch, 'cuda'):
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+
+def manage_memory(max_mem_mb: int = 4096):
+    """Manage memory usage with fallbacks"""
+    try:
+        current_mem = get_memory_usage()
+        if current_mem > max_mem_mb:
+            cleanup_memory()
+            current_mem = get_memory_usage()
+            if current_mem > max_mem_mb:
+                logger.warning(f"High memory usage: {current_mem:.0f}MB")
+    except Exception as e:
+        logger.error(f"Memory management error: {e}")
 
 # Enhanced logging with rotation
 from logging.handlers import RotatingFileHandler
@@ -49,25 +71,40 @@ class ProcessingConfig:
     
     def update_config(self):
         """Update configuration based on system resources"""
-        cpu_count = psutil.cpu_count(logical=False) or 1
-        available_memory = psutil.virtual_memory().available / (1024 * 1024 * 1024)  # GB
-        
-        self.FRAME_RATE = min(10, max(5, int(available_memory)))
-        self.PROCESS_EVERY_N_FRAMES = max(2, int(10 / self.FRAME_RATE))
-        self.MAX_RESOLUTION = (
-            min(480, int(available_memory * 100)),
-            min(360, int(available_memory * 75))
-        )
-        self.THREAD_POOL_SIZE = min(cpu_count, 2)
-        self.MAX_QUEUE_SIZE = max(3, min(5, int(available_memory)))
-        self.BATCH_SIZE = 1
-        self.MAX_RETRIES = 3
-        self.TIMEOUT = 1.0 / self.FRAME_RATE
+        try:
+            cpu_count = psutil.cpu_count(logical=False) or 1
+            available_memory = psutil.virtual_memory().available / (1024 * 1024)  # MB
+            
+            # Adjust parameters based on available memory
+            self.FRAME_RATE = min(10, max(5, int(available_memory / 1024)))
+            self.PROCESS_EVERY_N_FRAMES = max(2, int(10 / self.FRAME_RATE))
+            self.MAX_RESOLUTION = (
+                min(480, int(available_memory / 10)),
+                min(360, int(available_memory / 15))
+            )
+            self.THREAD_POOL_SIZE = min(cpu_count, 2)
+            self.MAX_QUEUE_SIZE = max(3, min(5, int(available_memory / 1024)))
+            self.BATCH_SIZE = 1
+            self.MAX_RETRIES = 3
+            self.TIMEOUT = 1.0 / self.FRAME_RATE
+            
+        except Exception as e:
+            logger.error(f"Error updating config: {e}")
+            # Fallback to conservative defaults
+            self.FRAME_RATE = 5
+            self.PROCESS_EVERY_N_FRAMES = 3
+            self.MAX_RESOLUTION = (320, 240)
+            self.THREAD_POOL_SIZE = 1
+            self.MAX_QUEUE_SIZE = 3
+            self.BATCH_SIZE = 1
+            self.MAX_RETRIES = 3
+            self.TIMEOUT = 0.2
 
 @st.cache_resource(ttl=3600)  # Cache for 1 hour
 def get_yolo_model(model_path: str) -> Optional[YOLO]:
     """Load and cache YOLO model with memory management"""
     try:
+        cleanup_memory()  # Clean up before loading model
         logger.info(f"Loading model from {model_path}")
         model = YOLO(model_path)
         model.fuse()  # Fuse layers for better inference speed
@@ -195,8 +232,8 @@ class YOLOProcessor:
             self._thread_pool.shutdown(wait=True)
 
 def main():
-    # Set memory limit
-    limit_memory(4.0)  # 4GB limit
+    # Initialize memory management
+    manage_memory()
     
     st.set_page_config(
         page_title="Underwater Object Detection",
@@ -212,6 +249,10 @@ def main():
         model_type = st.selectbox("Select Model", list(YOLO_WEIGHTS.keys()))
         confidence = st.slider("Confidence", 0.0, 1.0, 0.5)
         
+        # Show memory usage
+        current_mem = get_memory_usage()
+        st.sidebar.markdown(f"Memory Usage: {current_mem:.0f}MB")
+        
         model = get_yolo_model(str(YOLO_WEIGHTS[model_type]))
         if not model:
             st.error("Model loading failed")
@@ -219,11 +260,14 @@ def main():
 
         source_type = st.selectbox("Input Source", SOURCES_LIST)
 
-    # Main content area with error handling
+    # Main content area with error handling and memory management
     try:
         if source_type == "Webcam":
             if st.session_state.processor:
                 st.session_state.processor.__del__()
+            
+            # Clean up before starting new processor
+            cleanup_memory()
             
             st.session_state.processor = webrtc_streamer(
                 key="underwater-detection",
@@ -254,9 +298,13 @@ def main():
         elif source_type == "Video":
             infer_uploaded_video(confidence, model)
 
+        # Periodic memory management
+        manage_memory()
+
     except Exception as e:
         logger.error(f"Main application error: {e}")
         st.error("An error occurred. Please try refreshing the page or selecting a different input source.")
+        cleanup_memory()  # Clean up after error
 
 if __name__ == "__main__":
     main()
