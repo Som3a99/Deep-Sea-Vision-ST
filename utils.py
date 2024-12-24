@@ -111,7 +111,9 @@ def infer_uploaded_image(conf: float, model: YOLO):
                         
                         # Display metrics
                         metrics = {
-                            "Process Time": f"{process_time:.2f}s
+                            "Process Time": f"{process_time:.2f}s",
+                            "Objects Detected": len(results[0].names),
+                            "Memory Usage": f"{MemoryManager.check_memory():.2f}MB"
                             }
                         st.write(metrics)
         except Exception as e:
