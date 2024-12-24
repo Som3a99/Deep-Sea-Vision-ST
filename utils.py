@@ -1,19 +1,20 @@
 # utils.py
-from ultralytics import YOLO
 import streamlit as st
-from PIL import Image
-import tempfile
+from ultralytics import YOLO
 import cv2
+import tempfile
+import os
 import numpy as np
 import time
 import logging
-from typing import Tuple, Optional
+from typing import Optional, Tuple
+import torch
 
 logger = logging.getLogger(__name__)
 
 @st.cache_resource
 def load_model(model_path: str) -> Optional[YOLO]:
-    """Load YOLO model with error handling and caching."""
+    """Load YOLO model with error handling and caching"""
     try:
         model = YOLO(model_path)
         logger.info(f"Successfully loaded model from {model_path}")
@@ -22,8 +23,8 @@ def load_model(model_path: str) -> Optional[YOLO]:
         logger.error(f"Error loading YOLO model: {e}")
         return None
 
-def process_video_frame(frame: np.ndarray, model, conf: float) -> Tuple[np.ndarray, Optional[object]]:
-    """Process a single video frame with error handling."""
+def process_video_frame(frame: np.ndarray, model: YOLO, conf: float) -> Tuple[np.ndarray, Optional[object]]:
+    """Process a single video frame with error handling"""
     try:
         results = model.predict(frame, conf=conf)
         return results[0].plot(), results[0].boxes
@@ -31,8 +32,8 @@ def process_video_frame(frame: np.ndarray, model, conf: float) -> Tuple[np.ndarr
         logger.error(f"Error processing video frame: {e}")
         return frame, None
 
-def infer_uploaded_image(conf: float, model):
-    """Handle image upload and inference with progress tracking."""
+def infer_uploaded_image(conf: float, model: YOLO):
+    """Handle image upload and inference with progress tracking"""
     uploaded_file = st.file_uploader(
         "Upload an image",
         type=["jpg", "jpeg", "png"],
@@ -41,33 +42,41 @@ def infer_uploaded_image(conf: float, model):
     
     if uploaded_file:
         try:
-            # Show upload status
             with st.spinner("Processing image..."):
-                image = Image.open(uploaded_file)
-                st.image(image, caption="Uploaded Image", use_column_width=True)
+                # Create columns for before/after display
+                col1, col2 = st.columns(2)
                 
-                if st.button("Run Detection", help="Click to start object detection"):
-                    # Create progress bar
+                # Read and display original image
+                image = cv2.imdecode(
+                    np.frombuffer(uploaded_file.read(), np.uint8),
+                    cv2.IMREAD_COLOR
+                )
+                with col1:
+                    st.image(cv2.cvtColor(image, cv2.COLOR_BGR2RGB), caption="Original Image")
+                
+                if st.button("Detect Objects"):
                     progress_bar = st.progress(0)
-                    progress_bar.progress(25)
+                    start_time = time.time()
                     
                     # Run inference
-                    start_time = time.time()
                     results = model.predict(image, conf=conf)
-                    progress_bar.progress(75)
+                    progress_bar.progress(50)
                     
-                    # Show results
-                    st.image(results[0].plot(), caption="Detected Objects")
+                    # Display results
+                    with col2:
+                        st.image(
+                            cv2.cvtColor(results[0].plot(), cv2.COLOR_BGR2RGB),
+                            caption="Detected Objects"
+                        )
                     
                     # Show performance metrics
                     end_time = time.time()
                     process_time = end_time - start_time
                     progress_bar.progress(100)
                     
-                    # Display detection stats
                     st.success(f"""
                         Detection completed in {process_time:.2f} seconds
-                        - Detected objects: {len(results[0].boxes)}
+                        - Objects detected: {len(results[0].boxes)}
                         - Confidence threshold: {conf}
                     """)
                     
@@ -75,8 +84,8 @@ def infer_uploaded_image(conf: float, model):
             st.error(f"Error processing image: {str(e)}")
             logger.error(f"Image processing error: {e}")
 
-def infer_uploaded_video(conf: float, model):
-    """Handle video upload and inference with progress tracking."""
+def infer_uploaded_video(conf: float, model: YOLO):
+    """Handle video upload and inference with progress tracking"""
     uploaded_file = st.file_uploader(
         "Upload a video",
         type=["mp4", "avi", "mov"],
@@ -93,7 +102,7 @@ def infer_uploaded_video(conf: float, model):
             vid_cap = cv2.VideoCapture(tfile.name)
             total_frames = int(vid_cap.get(cv2.CAP_PROP_FRAME_COUNT))
             
-            if st.button("Run Detection", help="Click to start object detection"):
+            if st.button("Process Video"):
                 # Initialize progress tracking
                 progress_bar = st.progress(0)
                 frame_placeholder = st.empty()
@@ -114,7 +123,10 @@ def infer_uploaded_video(conf: float, model):
                     
                     # Process frame
                     frame, boxes = process_video_frame(frame, model, conf)
-                    frame_placeholder.image(frame, channels="BGR", caption="Detection in Progress")
+                    frame_placeholder.image(
+                        cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
+                        caption="Detection in Progress"
+                    )
                     
                     # Update stats
                     fps = current_frame / (time.time() - start_time)
@@ -129,7 +141,6 @@ def infer_uploaded_video(conf: float, model):
                 vid_cap.release()
                 os.unlink(tfile.name)
                 
-                # Final status
                 st.success(f"Video processing completed! Processed {current_frame} frames.")
                 
         except Exception as e:
